@@ -140,13 +140,21 @@ func main() {
 	buf := make([]byte, 512)
 
 	for {
-		size, source, err := udpConn.ReadFromUDP(buf)
+		_, source, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
 			fmt.Println("Error receiving data:", err)
 			break
 		}
 
-		requestHeaders := ToDTO(buf[:size])
+		requestHeaders := encodeHeader(buf[:12])
+
+		var rcode uint8
+
+		if requestHeaders.OP_CODE == 0 {
+			rcode = 0
+		} else {
+			rcode = 4
+		}
 
 		responseHeader := DnsHeader{
 			ID:      requestHeaders.ID,
@@ -157,54 +165,28 @@ func main() {
 			RD:      requestHeaders.RD,
 			RA:      0,
 			Z:       0,
-			RCODE:   4,
+			RCODE:   rcode,
 			QDCOUNT: 1,
 			ANCOUNT: 1,
 			NSCOUNT: 0,
 			ARCOUNT: 0,
 		}
 
-		// headers := []byte{}
-
-		// // 2 bytes of id
-		// headers = append(headers, ParseBigEndianUint(uint16(responseHeader.ID))...)
-
-		// // 2 bytes for flags
-		// headers = append(headers, byte(responseHeader.EncodeHeaderDTO()))
-
 		headers := responseHeader.EncodeHeaderDTO()
-
-		// headers := [12]byte{}
-
-		// // 2 bytes of id
-		// binary.BigEndian.PutUint16(headers[:2], binary.BigEndian.Uint16(buf[:2])) // ID = 1234 (0x04D2),
-
-		// // 1 byte of QR, OPCODE, AA, TC, RD AND
-		// headers[2] = (1 << 7) | // qr msb
-		// 	(0 << 3) | // opcode 3 msb
-		// 	(0 << 2) | // aa // 2 msb
-		// 	(0 << 2) | // tc
-		// 	(0 << 1) // rd
-
-		// headers[3] = 0
-
-		// binary.BigEndian.PutUint16(headers[4:6], uint16(1)) // QDCOUNT
-		// binary.BigEndian.PutUint16(headers[6:8], uint16(1)) //ANCOUNT
-		// binary.BigEndian.PutUint16(headers[8:10], 0)
-		// binary.BigEndian.PutUint16(headers[10:12], 0)
 
 		questions := []byte{}
 
-		parsedDomain := ParseString("codecrafters.io")
+		parsedDomain := ParseQuestion(buf[12:])
+		byteDomain := ParseString(parsedDomain)
 
 		// questions section
-		questions = append(questions, parsedDomain...)
+		questions = append(questions, byteDomain...)
 		questions = append(questions, ParseBigEndianUint(uint16(1))...) //  Type: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc.,
 		questions = append(questions, ParseBigEndianUint(uint16(1))...) // Class : 2-byte int; usually set to 1
 
 		// answers section
 		answer := []byte{}
-		answer = append(answer, parsedDomain...)
+		answer = append(answer, byteDomain...)
 		answer = append(answer, ParseBigEndianUint(uint16(1))...)  //  Type: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc.,
 		answer = append(answer, ParseBigEndianUint(uint16(1))...)  // Class : 2-byte int; usually set to 1
 		answer = append(answer, ParseBigEndianUint(uint32(60))...) // TTL	Any value, encoded as a 4-byte big-endian int. For example: 60.
@@ -223,7 +205,7 @@ func main() {
 	}
 }
 
-func ToDTO(request []byte) DnsHeader {
+func encodeHeader(request []byte) DnsHeader {
 	if len(request) < 12 {
 		panic("incorrect packet size")
 	}
@@ -272,6 +254,29 @@ func ParseBigEndianUint[T uint16 | uint32](num T) []byte {
 	}
 
 	return bytes
+
+}
+
+func ParseQuestion(request []byte) string {
+	offset := 0
+
+	var result []string
+
+	for offset < len(request) {
+
+		size := int(request[offset])
+
+		if size == 0 {
+			break
+		}
+
+		offset++
+
+		result = append(result, string(request[offset:offset+size]))
+		offset += size
+	}
+
+	return strings.Join(result, ".")
 
 }
 
