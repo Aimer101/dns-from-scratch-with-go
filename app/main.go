@@ -51,13 +51,13 @@ func main() {
 		// Z = 0, 3 bits
 		// RCODE = 0, 4 bits
 		// ============= 2 bytes ================
-		// QDCOUNT = 0, 16 bits
+		// QDCOUNT = 16 bits
 		// ============= 2 bytes ================
-		// ANCOUNT = 0, 16 bits
+		// ANCOUNT = 16 bits
 		// ============= 2 bytes ================
-		// NSCOUNT = 0, 16 bits
+		// NSCOUNT = 16 bits
 		// ============= 2 bytes ================
-		// ARCOUNT = 0 16 bits
+		// ARCOUNT = 16 bits
 
 		headers := [12]byte{}
 
@@ -73,19 +73,31 @@ func main() {
 
 		headers[3] = 0
 
-		binary.BigEndian.PutUint16(headers[4:6], uint16(1))
-		binary.BigEndian.PutUint16(headers[6:8], 0)
+		binary.BigEndian.PutUint16(headers[4:6], uint16(1)) // QDCOUNT
+		binary.BigEndian.PutUint16(headers[6:8], uint16(1)) //ANCOUNT
 		binary.BigEndian.PutUint16(headers[8:10], 0)
 		binary.BigEndian.PutUint16(headers[10:12], 0)
 
 		questions := []byte{}
 
+		parsedDomain := ParseString("codecrafters.io")
+
 		// questions section
-		questions = append(questions, ParseString("codecrafters.io")...)
-		questions = append(questions, ParseBigEndianUint16(1)...) // type
-		questions = append(questions, ParseBigEndianUint16(1)...) // class
+		questions = append(questions, parsedDomain...)
+		questions = append(questions, ParseBigEndianUint(uint16(1))...) //  Type: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc.,
+		questions = append(questions, ParseBigEndianUint(uint16(1))...) // Class : 2-byte int; usually set to 1
+
+		// answers section
+		answer := []byte{}
+		answer = append(answer, parsedDomain...)
+		answer = append(answer, ParseBigEndianUint(uint16(1))...)  //  Type: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc.,
+		answer = append(answer, ParseBigEndianUint(uint16(1))...)  // Class : 2-byte int; usually set to 1
+		answer = append(answer, ParseBigEndianUint(uint32(60))...) // TTL	Any value, encoded as a 4-byte big-endian int. For example: 60.
+		answer = append(answer, ParseBigEndianUint(uint16(4))...)  // Length 4, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)
+		answer = append(answer, ParseString("8.8.8.8")...)         //Any IP address, encoded as a 4-byte big-endian int. For example: \x08\x08\x08\x08 (that's 8.8.8.8 encoded as a 4-byte integer)
 
 		fullContent := append(headers[:], questions...)
+		fullContent = append(fullContent, answer...)
 
 		_, err = udpConn.WriteToUDP(fullContent, source)
 
@@ -96,11 +108,25 @@ func main() {
 	}
 }
 
-func ParseBigEndianUint16(num uint16) []byte {
-	bytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(bytes, uint16(num))
+func ParseBigEndianUint[T uint16 | uint32](num T) []byte {
 
-	return []byte(bytes)
+	var bytes []byte
+
+	switch any(num).(type) {
+	case uint16:
+		bytes = make([]byte, 2)
+		binary.BigEndian.PutUint16(bytes, uint16(num))
+
+	case uint32:
+		bytes = make([]byte, 4)
+		binary.BigEndian.PutUint32(bytes, uint32(num))
+
+	default:
+		panic("unsupported type")
+	}
+
+	return bytes
+
 }
 
 func ParseString(domainName string) []byte {
