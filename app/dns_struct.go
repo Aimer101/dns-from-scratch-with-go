@@ -149,8 +149,8 @@ func (dnsMessage *DNSMessage) serialize() []byte {
 	for _, question := range dnsMessage.Questions {
 		buffer = append(buffer, question.serialize()...)
 	}
-	for _, rr := range dnsMessage.ResourceRecords {
-		buffer = append(buffer, rr.serialize()...)
+	for _, resourceRecord := range dnsMessage.ResourceRecords {
+		buffer = append(buffer, resourceRecord.serialize()...)
 	}
 	return buffer
 }

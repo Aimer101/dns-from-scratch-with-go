@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func UnmarshalHeader(buffer []byte) DnsHeader {
+func unmarshalHeader(buffer []byte) DnsHeader {
 	return DnsHeader{
 		ID:      binary.BigEndian.Uint16(buffer[0:2]),
 		QR:      buffer[2] >> 7 & 1,
@@ -118,7 +118,7 @@ func uncompressLabel(processedPacket []byte, originalPacket []byte) string {
 // Name: A domain name, represented as a sequence of "labels" (more on this below)
 // Type: 2-byte int; the type of record (1 for an A record, 5 for a CNAME record etc., full list here)
 // Class: 2-byte int; usually set to 1 (full list here)
-func UnmarshalQuestions(packet []byte, nQuestions int) []DnsQuestion {
+func unmarshalQuestions(packet []byte, nQuestions int) ([]DnsQuestion, int) {
 	// label example are www google com
 	questions := []DnsQuestion{}
 
@@ -140,23 +140,86 @@ func UnmarshalQuestions(packet []byte, nQuestions int) []DnsQuestion {
 		offset += 2 // Class: 2-byte int;
 	}
 
-	return questions
+	return questions, offset
 }
 
-func CreateNewDnsMessage(packet []byte) DNSMessage {
-	query := UnmarshalHeader(packet[:12])
-	questions := UnmarshalQuestions(packet[12:], int(query.QDCOUNT))
-	answers := []DNSResourceRecords{}
+// Name	\x0ccodecrafters\x02io followed by a null byte (that's codecrafters.io encoded as a label sequence)
+// Type	1 encoded as a 2-byte big-endian int (corresponding to the "A" record type)
+// Class	1 encoded as a 2-byte big-endian int (corresponding to the "IN" record class)
+// TTL	Any value, encoded as a 4-byte big-endian int. For example: 60.
+// Length	4, encoded as a 2-byte big-endian int (corresponds to the length of the RDATA field)
+// Data	Any IP address, encoded as a 4-byte big-endian int. For example: \x08\x08\x08\x08 (that's 8.8.8.8 encoded as a 4-byte integer)
+func unmarshalAnswers(packet []byte, nAnswer int) []DNSResourceRecords {
+	var answers []DNSResourceRecords
 
-	for _, question := range questions {
-		answers = append(answers, DNSResourceRecords{
-			Name:         question.Name,
-			Type:         1,
-			Class:        1,
-			TTL:          0,
-			RDLength:     4,
-			ResourceData: []byte("\x08\x08\x08\x08"),
-		})
+	offset := 0
+
+	for i := 0; i < nAnswer; i++ {
+		size := bytes.Index(packet[offset:], []byte{0})
+		label := uncompressLabel(packet[offset:offset+size+1], packet)
+		offset += size + 1
+
+		answerType := binary.BigEndian.Uint16(packet[offset : offset+2])
+		offset += 2
+
+		answerClass := binary.BigEndian.Uint16(packet[offset : offset+2])
+		offset += 2
+
+		answerTTL := binary.BigEndian.Uint32(packet[offset : offset+4])
+		offset += 4
+
+		answerRdlLength := binary.BigEndian.Uint16(packet[offset : offset+2])
+		offset += 2
+
+		answerResourceData := packet[offset : offset+4]
+		offset += 4
+
+		result := DNSResourceRecords{
+			Name:         label,
+			Type:         answerType,
+			Class:        answerClass,
+			TTL:          answerTTL,
+			RDLength:     answerRdlLength,
+			ResourceData: answerResourceData,
+		}
+
+		answers = append(answers, result)
+
+	}
+
+	return answers
+}
+
+func CreateNewDnsMessage(remoteServerPacket []byte, clientPacket []byte) DNSMessage {
+	query := unmarshalHeader(remoteServerPacket[:12])
+
+	packetToUse := remoteServerPacket
+
+	if query.QDCOUNT == 0 {
+		packetToUse = clientPacket
+		query = unmarshalHeader(packetToUse[:12])
+	}
+
+	questions, size := unmarshalQuestions(packetToUse[12:], int(query.QDCOUNT))
+	var answers []DNSResourceRecords
+
+	// if ancount == 0, remote server cannot find it
+	// we will create it ourself
+	if query.ANCOUNT == 0 {
+		for _, q := range questions {
+			answers = append(answers, DNSResourceRecords{
+				Name:         q.Name,
+				Type:         1,
+				Class:        1,
+				TTL:          0,
+				RDLength:     4,
+				ResourceData: []byte("\x08\x08\x08\x08"),
+			})
+		}
+
+	} else {
+
+		answers = unmarshalAnswers(packetToUse[12+size:], int(query.ANCOUNT))
 	}
 
 	var rcode uint8

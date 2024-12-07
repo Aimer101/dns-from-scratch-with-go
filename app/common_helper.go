@@ -2,56 +2,7 @@ package main
 
 import (
 	"encoding/binary"
-	"strings"
 )
-
-func ParseString(domainName string) []byte {
-	// split at .
-	parts := strings.Split(domainName, ".")
-
-	result := []byte{}
-
-	for _, part := range parts {
-		result = append(result, byte(len(part)))
-		result = append(result, []byte(part)...)
-	}
-
-	result = append(result, '\000')
-
-	return result
-}
-
-func MarshalLabels(labels []string) []byte {
-	result := []byte{}
-
-	for _, label := range labels {
-		result = append(result, ParseString(label)...)
-	}
-
-	return result
-}
-
-func ParseQuestions(request []byte) string {
-	offset := 0
-
-	var result []string
-
-	for offset < len(request) {
-
-		size := int(request[offset])
-
-		if size == 0 {
-			break
-		}
-
-		offset++
-
-		result = append(result, string(request[offset:offset+size]))
-		offset += size
-	}
-
-	return strings.Join(result, ".")
-}
 
 func UintToBigEndian[T uint16 | uint32](num T) []byte {
 
